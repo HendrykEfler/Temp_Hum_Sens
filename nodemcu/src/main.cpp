@@ -1,17 +1,17 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <Wire.h>
+#include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include "webpage.h"   // HTML auslagern
 
 const char* ssid = "Vodafone-25B4";
 const char* password = "qaNPdMPHxC7xmg7x";
 
-WiFiServer server(80);
+ESP8266WebServer server(80);
 Adafruit_BME280 bme;
 
-float temperature = 0;
-float humidity = 0;
-float pressure = 0;
+float temperature, humidity, pressure;
 
 unsigned long lastMeasurement = 0;
 const unsigned long MEASURE_INTERVAL = 2000; // 2 Sekunden
@@ -23,10 +23,24 @@ void measureSensor() {
   temperature = bme.readTemperature();
   humidity = bme.readHumidity();
   pressure = bme.readPressure() / 100.0F;
+  Serial.print("TestAdapter");
 
   digitalWrite(LED_BUILTIN, LED_ON);
   delay(50);
   digitalWrite(LED_BUILTIN, LED_OFF);
+}
+
+void handleRoot() {
+  // HTML direkt aus PROGMEM senden, ohne RAM-Overflow
+  server.send_P(200, "text/html", MAIN_page);
+}
+
+void handleData() {
+  // JSON dynamisch generieren
+  String json = String("{\"temperature\":") + temperature +
+                ",\"humidity\":" + humidity +
+                ",\"pressure\":" + pressure + "}";
+  server.send(200, "application/json", json);
 }
 
 void setup() {
@@ -42,47 +56,31 @@ void setup() {
   }
 
   WiFi.begin(ssid, password);
-Serial.print("Verbinde mit WLAN");
-while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-}
 
-Serial.println(); // neue Zeile
-Serial.print("NodeMCU verbunden! IP-Adresse: ");
-Serial.println(WiFi.localIP());
+  Serial.print("Verbinde mit WLAN");
+  while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+  }
 
-// <-- Hier den Status ausgeben
-Serial.print("WiFi Status Code: ");
-Serial.println(WiFi.status());
+  Serial.println(); // neue Zeile
+  Serial.print("NodeMCU verbunden! IP-Adresse: ");
+  Serial.println(WiFi.localIP());
 
-server.begin();
+  // // <-- Hier den Status ausgeben
+  // Serial.print("WiFi Status Code: ");
+  // Serial.println(WiFi.status());
+
+  // Server Routen definieren
+  server.on("/", handleRoot);
+  server.on("/data", handleData);
+  server.begin();
 }
 
 void loop() {
+  server.handleClient(); // kümmert sich um alle HTTP-Clients
   if (millis() - lastMeasurement >= MEASURE_INTERVAL) {
     lastMeasurement = millis();
     measureSensor();
   }
-  
-  WiFiClient client = server.available();
-  if (!client) return;
-  String request = client.readStringUntil('\r');
-  client.flush();
-
-  if (request.indexOf("GET /data") >= 0) {
-    client.println("HTTP/1.1 200 OK");
-    client.println("Content-Type: application/json\n");
-    client.print("{\"temperature\":"); client.print(temperature);
-    client.print(",\"humidity\":"); client.print(humidity);
-    client.print(",\"pressure\":"); client.print(pressure);
-    client.print("}");
-    client.stop();
-    return;
-  }
-
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html\n");
-  client.println(MAIN_page); // HTML aus webpage.h
-  client.stop();
 }
